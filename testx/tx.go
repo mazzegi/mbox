@@ -13,6 +13,10 @@ type Tx struct {
 	t *testing.T
 }
 
+func (tx *Tx) T() *testing.T {
+	return tx.t
+}
+
 func (tx *Tx) AssertEqual(want, have any) {
 	tx.t.Helper()
 	if reflect.DeepEqual(want, have) {
