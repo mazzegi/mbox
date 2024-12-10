@@ -113,6 +113,9 @@ func (s *Store[T]) Load(entityID string) (T, uint64, error) {
 	if err != nil {
 		return makex.ZeroOf[T](), 0, sqlx.ErrNotFound
 	}
+	if bl.Deleted {
+		return makex.ZeroOf[T](), 0, sqlx.ErrNotFound
+	}
 	return bl.Data, bl.StreamVersion, nil
 }
 
