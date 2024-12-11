@@ -517,10 +517,15 @@ func (im *SqliteXIndexManager) Query(bucketName string, indexName string, lo que
 		orderBys = append(orderBys, fmt.Sprintf("%s %s", fs.Name, fs.Order))
 	}
 
-	args = append(args,
-		sql.Named("limit", lo.Limit),
-		sql.Named("offset", lo.Offset),
-	)
+	var limitOffsetClause string
+	if lo.Limit > 0 {
+		limitOffsetClause = " LIMIT :limit OFFSET :offset"
+		args = append(args,
+			sql.Named("limit", lo.Limit),
+			sql.Named("offset", lo.Offset),
+		)
+	}
+
 	var where string
 	if len(wheres) > 0 {
 		where = " WHERE " + strings.Join(wheres, " AND ")
@@ -530,7 +535,7 @@ func (im *SqliteXIndexManager) Query(bucketName string, indexName string, lo que
 		orderBy = " ORDER BY " + strings.Join(orderBys, ", ")
 	}
 
-	q := fmt.Sprintf("SELECT key FROM %s %s %s LIMIT :limit OFFSET :offset;", idxMeta.TableName, where, orderBy)
+	q := fmt.Sprintf("SELECT key FROM %s %s %s %s;", idxMeta.TableName, where, orderBy, limitOffsetClause)
 	rows, err := im.dbx.QueryContext(
 		context.TODO(),
 		q,
