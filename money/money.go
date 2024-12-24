@@ -1,8 +1,10 @@
 package money
 
 import (
+	"encoding/json"
 	"fmt"
 	"math"
+	"strconv"
 	"strings"
 
 	"golang.org/x/text/language"
@@ -16,7 +18,6 @@ const (
 	EUR Currency = "EUR"
 	USD Currency = "USD"
 	GBP Currency = "GBP"
-	ZLO Currency = "ZLO"
 )
 
 func (c Currency) MarshalJSON() ([]byte, error) {
@@ -27,8 +28,6 @@ func (c Currency) MarshalJSON() ([]byte, error) {
 		return []byte(`"USD"`), nil
 	case GBP:
 		return []byte(`"GBP"`), nil
-	case ZLO:
-		return []byte(`"PLN"`), nil
 	default:
 		return []byte(`"NA"`), nil
 	}
@@ -39,8 +38,8 @@ type Amount int64
 
 // Money represents an amount of money in a particular currency
 type Money struct {
-	Amount   Amount   `json:"amount" openapi:"desc=Amount in cents"`
-	Currency Currency `json:"currency" openapi:"desc=Currency"`
+	Amount   Amount   `json:"amount"`
+	Currency Currency `json:"currency"`
 }
 
 func New(a Amount, c Currency) Money {
@@ -56,10 +55,6 @@ func Decimal(v float64, c Currency) Money {
 
 func Euro(v float64) Money {
 	return Decimal(v, EUR)
-}
-func Zloty(v float64) Money {
-	return Decimal(v*4.2913, ZLO)
-	//return Decimal(v, ZLO)
 }
 
 func Cents(v int64, c Currency) Money {
@@ -120,4 +115,32 @@ func (m Money) Mult(v float64) Money {
 
 func (m Money) Times(n int) Money {
 	return New(m.Amount*Amount(n), m.Currency)
+}
+
+//JSON
+// func (m Money) MarshalJSON() ([]byte, error) {
+// 	return []byte(fmt.Sprintf(`{"amount":%d,"currency":"%s"}`, m.Amount, m.Currency)), nil
+// }
+
+type umjMoney Money
+
+func (m *Money) UnmarshalJSON(data []byte) error {
+	// try default
+	var um umjMoney
+	if err := json.Unmarshal(data, &um); err == nil {
+		*m = Money(um)
+		return nil
+	}
+
+	// test if data is float or int
+	if v, err := strconv.ParseFloat(string(data), 64); err == nil {
+		*m = Decimal(v, EUR)
+		return nil
+	}
+	if v, err := strconv.ParseInt(string(data), 10, 64); err == nil {
+		*m = Decimal(float64(v), EUR)
+		return nil
+	}
+
+	return fmt.Errorf("UnmarshalJSON: cannot unmarshal %q into money.Money", string(data))
 }
