@@ -56,6 +56,7 @@ type Bucket interface {
 	PutJSONMany(ts ...Tuple[string, any]) error
 	PutJSON(key string, value any) error
 	PutJSONWithMeta(key string, value any, meta any) error
+	PutStringWithMeta(key, value string, meta any) error
 
 	// PutJSONIndexValue(key string, value any, indexValue any) error
 	// PutJSONIndexValueMeta(key string, value any, indexValue any, meta any) error

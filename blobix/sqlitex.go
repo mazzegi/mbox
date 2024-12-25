@@ -107,7 +107,10 @@ func (b *SqliteXStoreBucket) PutJSON(key string, value any) error {
 
 func (b *SqliteXStoreBucket) PutJSONWithMeta(key string, value any, meta any) error {
 	return b.PutJSONIndexValueMeta(key, value, value, meta)
+}
 
+func (b *SqliteXStoreBucket) PutStringWithMeta(key string, value string, meta any) error {
+	return b.PutStringIndexValueMeta(key, value, value, meta)
 }
 
 func (b *SqliteXStoreBucket) PutJSONIndexValue(key string, value any, indexValue any) error {
@@ -145,6 +148,37 @@ func (b *SqliteXStoreBucket) PutJSONIndexValueMeta(key string, value any, indexV
 	if err != nil {
 		tx.Rollback()
 		return fmt.Errorf("update indexes: %w", err)
+	}
+
+	err = tx.Commit()
+	if err != nil {
+		return fmt.Errorf("commit-tx: %w", err)
+	}
+	return err
+}
+
+func (b *SqliteXStoreBucket) PutStringIndexValueMeta(key string, value string, indexValue string, meta any) error {
+	var metabs []byte
+	if meta != nil {
+		var err error
+		metabs, err = json.Marshal(meta)
+		if err != nil {
+			return fmt.Errorf("json.marshal meta: %w", err)
+		}
+	}
+	tx, err := b.dbx.BeginTx(context.TODO(), nil)
+	if err != nil {
+		return fmt.Errorf("begin-tx: %w", err)
+	}
+
+	_, err = tx.ExecContext(
+		context.TODO(),
+		"INSERT OR REPLACE INTO data (bucket ,key, modified_on, meta, value) VALUES(?,?,?,?,?);",
+		b.name, key, formatTime(time.Now()), string(metabs), value,
+	)
+	if err != nil {
+		tx.Rollback()
+		return fmt.Errorf("exec insert: %w", err)
 	}
 
 	err = tx.Commit()
