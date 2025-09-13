@@ -1,14 +1,13 @@
-package entity_v2
+package entity_v3
 
 import (
-	"errors"
 	"fmt"
 	"strings"
 
-	"github.com/mazzegi/mbox/blobix"
+	"github.com/mazzegi/mbox/blobix_v2"
 	"github.com/mazzegi/mbox/es"
 	"github.com/mazzegi/mbox/makex"
-	"github.com/mazzegi/mbox/sqlx"
+	"github.com/mazzegi/mbox/query"
 	"github.com/mazzegi/mbox/urn"
 
 	"github.com/r3labs/diff/v3"
@@ -68,26 +67,29 @@ type Blob[T Entity] struct {
 
 //
 
-func NewStore[T Entity](prefix string, events es.Store, snapshots blobix.Store) *Store[T] {
+func NewStore[T Entity](prefix string, events es.Store, snapQueries blobix_v2.Store) *Store[T] {
 	codec := es.NewCodec()
 	codec.Register(urn.Make(prefix, "created").String(), Created[T]{})
 	codec.Register(urn.Make(prefix, "deleted").String(), Deleted[T]{})
 	codec.Register(urn.Make(prefix, "changed").String(), Changed[T]{})
 	codec.Register(urn.Make(prefix, "replaced").String(), Replaced[T]{})
 
+	snapBucket := blobix_v2.NewBucket[Blob[T]](snapQueries, prefix)
 	return &Store[T]{
-		prefix:    prefix,
-		events:    events,
-		snapshots: snapshots,
-		codec:     codec,
+		prefix:      prefix,
+		events:      events,
+		snapQueries: snapQueries,
+		snapBucket:  *snapBucket,
+		codec:       codec,
 	}
 }
 
 type Store[T Entity] struct {
-	prefix    string
-	events    es.Store
-	snapshots blobix.Store
-	codec     *es.Codec
+	prefix      string
+	events      es.Store
+	snapQueries blobix_v2.Store
+	snapBucket  blobix_v2.Bucket[Blob[T]]
+	codec       *es.Codec
 }
 
 func (s *Store[T]) Codec() *es.Codec {
@@ -106,27 +108,32 @@ func (s *Store[T]) StoreVersion() uint64 {
 	return s.events.StoreVersion()
 }
 
-func (s *Store[T]) Load(entityID string) (T, uint64, error) {
-	var bl Blob[T]
-	bucket := s.snapshots.Bucket(s.prefix)
-	_, err := bucket.JSON(entityID, &bl)
+func (s *Store[T]) Load(entityID string) (T, uint64, query.Found, error) {
+	bl, found, err := s.snapBucket.Find(entityID)
 	if err != nil {
-		return makex.ZeroOf[T](), 0, sqlx.ErrNotFound
+		return makex.ZeroOf[T](), 0, false, fmt.Errorf("snap-bucket.find: %w", err)
+	}
+	if !found {
+		return makex.ZeroOf[T](), 0, false, nil
 	}
 	if bl.Deleted {
-		return makex.ZeroOf[T](), 0, sqlx.ErrNotFound
+		return makex.ZeroOf[T](), 0, false, nil
 	}
-	return bl.Data, bl.StreamVersion, nil
+	return bl.Data, bl.StreamVersion, true, nil
 }
 
-func (s *Store[T]) LoadBlob(entityID string) (Blob[T], error) {
-	var bl Blob[T]
-	bucket := s.snapshots.Bucket(s.prefix)
-	_, err := bucket.JSON(entityID, &bl)
+func (s *Store[T]) LoadBlob(entityID string) (Blob[T], query.Found, error) {
+	bl, found, err := s.snapBucket.Find(entityID)
 	if err != nil {
-		return bl, sqlx.ErrNotFound
+		return makex.ZeroOf[Blob[T]](), false, fmt.Errorf("snap-bucket.find: %w", err)
 	}
-	return bl, nil
+	if !found {
+		return makex.ZeroOf[Blob[T]](), false, nil
+	}
+	if bl.Deleted {
+		return makex.ZeroOf[Blob[T]](), false, nil
+	}
+	return bl, true, nil
 }
 
 func (s *Store[T]) Diff(old, new T) (diff.Changelog, error) {
@@ -176,14 +183,14 @@ func (s *Store[T]) Update(newEnt T, oldEnt T, ver uint64, meta es.MetaData) (Upd
 	newVersion := ver + 1
 
 	//snapshot
-	bucket := s.snapshots.Bucket(s.prefix)
-	err = bucket.PutJSON(entityID, Blob[T]{
+	err = s.snapBucket.Save(entityID, Blob[T]{
 		EntityID:      entityID,
 		StreamID:      string(s.StreamID(entityID)),
 		StreamVersion: newVersion,
 		Deleted:       false,
 		Data:          newEnt,
 	})
+
 	if err != nil {
 		return UpdateResult{}, fmt.Errorf("save snapshot")
 	}
@@ -199,12 +206,12 @@ func (s *Store[T]) Update(newEnt T, oldEnt T, ver uint64, meta es.MetaData) (Upd
 func (s *Store[T]) Save(ent T, meta es.MetaData) (UpdateResult, error) {
 	entityID := ent.EntityID()
 	//currEnt, ver, deleted, err := s.loadBlob(entityID)
-	bl, err := s.LoadBlob(entityID)
+	bl, found, err := s.LoadBlob(entityID)
 	switch {
 	case bl.Deleted:
 		// reincarnated !!
 		return s.replace(ent, bl.StreamVersion, meta)
-	case errors.Is(err, sqlx.ErrNotFound) || bl.StreamVersion == 0:
+	case !bool(found) || bl.StreamVersion == 0:
 		return s.Create(ent, meta)
 	case err != nil:
 		return UpdateResult{}, fmt.Errorf("load %q: %w", entityID, err)
@@ -213,9 +220,12 @@ func (s *Store[T]) Save(ent T, meta es.MetaData) (UpdateResult, error) {
 }
 
 func (s *Store[T]) Delete(entityID string, meta es.MetaData) (UpdateResult, error) {
-	ent, ver, err := s.Load(entityID)
+	ent, ver, found, err := s.Load(entityID)
 	if err != nil {
 		return UpdateResult{}, fmt.Errorf("load %q: %w", entityID, err)
+	}
+	if !found {
+		return UpdateResult{}, fmt.Errorf("not found %q", entityID)
 	}
 
 	//
@@ -234,14 +244,14 @@ func (s *Store[T]) Delete(entityID string, meta es.MetaData) (UpdateResult, erro
 	newVersion := ver + 1
 
 	//snapshot
-	bucket := s.snapshots.Bucket(s.prefix)
-	err = bucket.PutJSON(entityID, Blob[T]{
+	err = s.snapBucket.Save(entityID, Blob[T]{
 		EntityID:      entityID,
 		StreamID:      string(s.StreamID(entityID)),
 		StreamVersion: newVersion,
 		Deleted:       true,
 		Data:          ent,
 	})
+
 	if err != nil {
 		return UpdateResult{}, fmt.Errorf("save snapshot")
 	}
@@ -268,8 +278,7 @@ func (s *Store[T]) Create(ent T, meta es.MetaData) (UpdateResult, error) {
 		return UpdateResult{}, fmt.Errorf("append created event: %w", err)
 	}
 	// update snapshots
-	bucket := s.snapshots.Bucket(s.prefix)
-	err = bucket.PutJSON(entityID, Blob[T]{
+	err = s.snapBucket.Save(entityID, Blob[T]{
 		EntityID:      entityID,
 		StreamID:      string(s.StreamID(entityID)),
 		StreamVersion: 1,
@@ -305,8 +314,7 @@ func (s *Store[T]) replace(ent T, ver uint64, meta es.MetaData) (UpdateResult, e
 	newVersion := ver + 1
 
 	// update snapshots
-	bucket := s.snapshots.Bucket(s.prefix)
-	err = bucket.PutJSON(entityID, Blob[T]{
+	err = s.snapBucket.Save(entityID, Blob[T]{
 		EntityID:      entityID,
 		StreamID:      string(s.StreamID(entityID)),
 		StreamVersion: newVersion,
@@ -334,9 +342,8 @@ type EntityPage[T Entity] struct {
 func (s *Store[T]) StreamEntities(pageLimit int) <-chan EntityPage[T] {
 	c := make(chan EntityPage[T])
 	go func() {
-		bucket := s.snapshots.Bucket(s.prefix)
 		defer close(c)
-		for kp := range blobix.StreamKeys(bucket, pageLimit) {
+		for kp := range blobix_v2.StreamKeys(s.snapQueries, s.prefix, pageLimit) {
 			if kp.Error != nil {
 				c <- EntityPage[T]{Error: kp.Error}
 				return
@@ -346,9 +353,13 @@ func (s *Store[T]) StreamEntities(pageLimit int) <-chan EntityPage[T] {
 				Idx:      kp.Idx,
 			}
 			for i, key := range kp.Keys {
-				b, err := blobix.Value[Blob[T]](bucket, key)
+				b, found, err := s.snapBucket.Find(key)
 				if err != nil {
-					c <- EntityPage[T]{Error: kp.Error}
+					c <- EntityPage[T]{Error: err}
+					return
+				}
+				if !found {
+					c <- EntityPage[T]{Error: fmt.Errorf("no found %q", key)}
 					return
 				}
 				if b.Deleted {
