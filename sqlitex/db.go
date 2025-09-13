@@ -96,6 +96,14 @@ func (db *DB) QueryRowContext(ctx context.Context, query string, args ...any) *s
 	return db.reader.QueryRowContext(ctx, query, args...)
 }
 
+func (db *DB) PrepareExec(query string) (*sql.Stmt, error) {
+	return db.writer.Prepare(query)
+}
+
+func (db *DB) PrepareQuery(query string) (*sql.Stmt, error) {
+	return db.reader.Prepare(query)
+}
+
 func (db *DB) PrepareExecContext(ctx context.Context, query string) (*sql.Stmt, error) {
 	return db.writer.PrepareContext(ctx, query)
 }
