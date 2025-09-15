@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"testing"
 	"time"
 
@@ -167,4 +168,69 @@ func TestStoreIndex(t *testing.T) {
 		tx.AssertEqual(true, ok)
 		tx.AssertEqual(expVal, qv)
 	}
+}
+
+func TestStoreIterKeys(t *testing.T) {
+	tx := testx.NewTx(t)
+
+	tmpFolderName := fmt.Sprintf("test_iter_keys_%s", time.Now().Format("20060102_150405"))
+	err := os.MkdirAll(tmpFolderName, os.ModePerm)
+	tx.AssertNoErr(err)
+	defer os.RemoveAll(tmpFolderName)
+
+	storeFile := filepath.Join(tmpFolderName, "test.db")
+	store, err := NewSqliteXStore(storeFile)
+	tx.AssertNoErr(err)
+	defer store.Close()
+
+	bucket := NewBucket[TestStoreType](store, "test_type")
+
+	numRecords := 812
+	allKeys := make([]string, numRecords)
+	for n := range numRecords {
+		key := fmt.Sprintf("test_key_%06d", n)
+		allKeys[n] = key
+		t := NewTestStoreType(key, n+1)
+		err := bucket.Save(key, t)
+		tx.AssertNoErr(err)
+	}
+	sort.Strings(allKeys)
+	//
+	// now iter keys
+	var foundKeys []string
+	for key, err := range bucket.IterKeys() {
+		tx.AssertNoErr(err)
+		foundKeys = append(foundKeys, key)
+	}
+	sort.Strings(foundKeys)
+	tx.AssertEqual(allKeys, foundKeys)
+
+	// now with errFunc
+
+	errFunc := func(n int) error {
+		if n == 112 {
+			return fmt.Errorf("112 is enough")
+		}
+		return nil
+	}
+	idx := 0
+	for _, err := range bucket.testIterKeysWithErrFunc(errFunc) {
+		if idx < 112 {
+			tx.AssertNoErr(err)
+		} else {
+			tx.AssertErr(err)
+		}
+		idx++
+	}
+
+	// now with break
+	idx = 0
+	for _, err := range bucket.testIterKeysWithErrFunc(func(int) error { return nil }) {
+		tx.AssertNoErr(err)
+		if idx >= 112 {
+			break
+		}
+		idx++
+	}
+	// to come until here is enough to pass the test - if the iterator doesn't react correctly to break a panic occurs
 }

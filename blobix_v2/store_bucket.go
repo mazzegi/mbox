@@ -3,7 +3,9 @@ package blobix_v2
 import (
 	"encoding/json"
 	"fmt"
+	"iter"
 
+	"github.com/mazzegi/log"
 	"github.com/mazzegi/mbox/query"
 )
 
@@ -251,4 +253,63 @@ func ValuesTyped[DESTTYPE any](store Store, bucketName string, keys ...string) (
 		ts = append(ts, t)
 	}
 	return ts, nil
+}
+
+func (b *Bucket[T]) IterKeys() iter.Seq2[string, error] {
+	return func(yield func(string, error) bool) {
+		skip := 0
+		pageLimit := 50
+		for {
+			ks, err := b.store.KeysPage(b.name, skip, pageLimit, query.SortASC)
+			if err != nil {
+				yield("", fmt.Errorf("keys-page: %w", err))
+				return
+			}
+			for _, k := range ks {
+				ok := yield(k, nil)
+				if !ok {
+					return
+				}
+			}
+			if len(ks) < pageLimit {
+				return
+			}
+			skip += pageLimit
+		}
+	}
+}
+
+func (b *Bucket[T]) testIterKeysWithErrFunc(errFnc func(int) error) iter.Seq2[string, error] {
+	return func(yield func(string, error) bool) {
+		defer func() {
+			log.Debugf("goodbye!")
+		}()
+		skip := 0
+		idx := 0
+		pageLimit := 50
+		for {
+			ks, err := b.store.KeysPage(b.name, skip, pageLimit, query.SortASC)
+			if err != nil {
+				yield("", fmt.Errorf("keys-page: %w", err))
+				return
+			}
+
+			for _, k := range ks {
+				if errFnc(idx) != nil {
+					yield("", fmt.Errorf("error func striked on idx %d", idx))
+					return
+				}
+				ok := yield(k, nil)
+				idx++
+				_ = ok
+				if !ok {
+					return
+				}
+			}
+			if len(ks) < pageLimit {
+				return
+			}
+			skip += pageLimit
+		}
+	}
 }
