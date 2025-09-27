@@ -32,7 +32,10 @@ func (b Bucket[T]) AddOrUpdateIndex(idxName string, fields ...IndexField[T]) err
 		Fields:     fieldDescs,
 	}
 	if IndexDescriptorsEqual(existingIdx, newIdx) {
-		// nothing to todo
+		b.indexes[idxName] = BucketIndex[T]{
+			IndexName: idxName,
+			Fields:    fields,
+		}
 		return nil
 	}
 	// ok - something changed - drop existing, create new, rebuild
