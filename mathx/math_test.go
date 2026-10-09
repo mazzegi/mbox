@@ -27,3 +27,30 @@ func TestRoundPlaces(t *testing.T) {
 		})
 	}
 }
+
+func TestMinMax(t *testing.T) {
+	tests := []struct {
+		values  []float64
+		wantMin float64
+		wantMax float64
+	}{
+		{[]float64{}, 0, 0},
+		{nil, 0, 0},
+		{[]float64{12.4}, 12.4, 12.4},
+		{[]float64{12.4, 3.001}, 3.001, 12.4},
+		{[]float64{12.4, 3.001, 12323.01, -56.2}, -56.2, 12323.01},
+	}
+	for i, test := range tests {
+		tx := testx.NewTxWithTestIdx(t, i)
+		min := Min(test.values...)
+		max := Max(test.values...)
+		tx.AssertEqual(test.wantMin, min)
+		tx.AssertEqual(test.wantMax, max)
+	}
+	for i, test := range tests {
+		tx := testx.NewTxWithTestIdx(t, i)
+		min, max := MinMax(test.values...)
+		tx.AssertEqual(test.wantMin, min)
+		tx.AssertEqual(test.wantMax, max)
+	}
+}
