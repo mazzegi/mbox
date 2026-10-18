@@ -96,6 +96,10 @@ func (s *Store[T]) Codec() *es.Codec {
 	return s.codec
 }
 
+func (s *Store[T]) DecodeRawEvent(re es.RawEvent) (es.DomainEvent, error) {
+	return s.codec.Decode(re)
+}
+
 func (s *Store[T]) StreamID(entityID string) es.StreamID {
 	return es.StreamID(urn.Make(s.prefix, entityID).String())
 }
