@@ -36,3 +36,28 @@ func TestFiles(t *testing.T) {
 		t.Fatalf("want %v, have %v", exp, e)
 	}
 }
+
+func TestFilesWD(t *testing.T) {
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	wd, err = filepath.Abs(wd)
+	if err != nil {
+		t.Fatalf("abs: %v", err)
+	}
+	os.Chdir(filepath.Join(wd, "test_files", "sub_1", "sub_2"))
+	t.Cleanup(func() {
+		os.Chdir(wd)
+	})
+	e := LoadDotenvWD()
+	exp := map[string]any{
+		"foo2":    "bazoo",
+		"bar":     int64(40),
+		"ixy":     "np",
+		"loc_dsn": "dsn={global_dsn}/local",
+	}
+	if !reflect.DeepEqual(exp, e) {
+		t.Fatalf("want %v, have %v", exp, e)
+	}
+}

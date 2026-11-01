@@ -7,6 +7,8 @@ import (
 	"os"
 	"strconv"
 	"strings"
+
+	"github.com/mazzegi/mbox/convert"
 )
 
 // merge merges "from" env into "to" env, keeping already existing values
@@ -47,6 +49,14 @@ func (env Env) add(k string, v any) {
 
 // Load loads environment variables from all available sources. It takes additional vars, which may be passed to the environment at runtime.
 func Load(vars ...Var) Env {
+	return load(LoadDotenv, vars...)
+}
+
+func LoadWD(vars ...Var) Env {
+	return load(LoadDotenvWD, vars...)
+}
+
+func load(dotenvFunc func() map[string]any, vars ...Var) Env {
 	env := Env{}
 	for _, osev := range os.Environ() {
 		k, v, _ := strings.Cut(osev, "=")
@@ -61,7 +71,7 @@ func Load(vars ...Var) Env {
 			env.add(k, v)
 		}
 	}
-	denv := LoadDotenv()
+	denv := dotenvFunc()
 	for k, v := range denv {
 		env.add(k, v)
 	}
@@ -126,6 +136,14 @@ func (env Env) Int(key string) (int, bool) {
 	}
 
 	return 0, false
+}
+
+func (env Env) Bool(key string) bool {
+	s, ok := env.String(key)
+	if !ok {
+		return false
+	}
+	return convert.ToBool(s)
 }
 
 // StringOrDefault first tries to lookup the passed key, otherwise return def

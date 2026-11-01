@@ -46,6 +46,27 @@ func loadDotenvToml(path string) (map[string]any, error) {
 	return vs, nil
 }
 
+const (
+	dotEnvFile     = ".env"
+	dotEnvFileToml = ".env.toml"
+)
+
+// LoadDotenv looks up .env and related files in the current working directory
+func LoadDotenvWD() map[string]any {
+	wd, err := os.Getwd()
+	if err != nil {
+		return map[string]any{}
+	}
+	all := map[string]any{}
+	if vs, err := loadDotenv(filepath.Join(wd, dotEnvFile)); err == nil {
+		merge(vs, all)
+	}
+	if vs, err := loadDotenvToml(filepath.Join(wd, dotEnvFileToml)); err == nil {
+		merge(vs, all)
+	}
+	return all
+}
+
 // LoadDotenv looks up .env and related files in the current directory and the in parent directories.
 // Existing values are not overwritten by higher level files.
 // Filenames considered are ".env" (usual .env files ), ".env.toml" (decoded as toml), where ".env" is evaluated before ".env.toml"
@@ -72,10 +93,6 @@ func LoadDotenv() map[string]any {
 		dirSl = append(dirSl, e)
 	}
 
-	const (
-		dotEnvFile     = ".env"
-		dotEnvFileToml = ".env.toml"
-	)
 	all := map[string]any{}
 	for {
 		currDir := vol + sep + filepath.Join(dirSl...)
