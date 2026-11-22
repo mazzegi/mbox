@@ -36,6 +36,14 @@ func (tx *Tx) T() *testing.T {
 	return tx.t
 }
 
+func (tx *Tx) Assert(v bool) {
+	tx.t.Helper()
+	if v {
+		return
+	}
+	tx.t.Fatalf("%s: value is false", tx.name)
+}
+
 func (tx *Tx) AssertEqual(want, have any) {
 	tx.t.Helper()
 	if reflect.DeepEqual(want, have) {
